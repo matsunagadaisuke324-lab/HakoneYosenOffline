@@ -1,0 +1,16 @@
+{
+  "name": "箱根駅伝予選会 オフライン分担計測",
+  "short_name": "予選会Offline",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#eef2f6",
+  "theme_color": "#10243b",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
