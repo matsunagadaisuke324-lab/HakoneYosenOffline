@@ -1,7 +1,8 @@
 import {firebaseConfig} from './firebase-config.js';
-import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
-import {getAuth,signInAnonymously,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import {getFirestore,doc,setDoc,collection,onSnapshot,serverTimestamp,runTransaction} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+// Firebase SDK is loaded only when online features are requested.
+// This keeps the collector and IndexedDB available after an offline restart.
+let initializeApp, getAuth, signInAnonymously;
+let getFirestore, doc, collection, onSnapshot, serverTimestamp, runTransaction;
 const UNIVERSITIES=['中央学院','東海','神奈川','東洋','日本体育','東京国際','山梨学院','東京農業','大東文化','立教','法政','明治','専修','国士舘'];
 const $=id=>document.getElementById(id), KEY='hakone-offline-session-v1';
 const uuid=()=>crypto.randomUUID?.()||('id-'+Date.now()+'-'+Math.random().toString(36).slice(2));
@@ -25,7 +26,27 @@ async function saveSettings(){if(session.started)return;const next=$('raceId').v
 function csvDownload(name,rows){const csv='\ufeff'+rows.map(r=>r.map(x=>'"'+String(x??'').replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function ownCSV(){csvDownload(`${session.raceId}-${session.university}.csv`,[['raceId','大学','記録順','全体1位との差(ms)','表示タイム'],...session.records.map((r,i)=>[session.raceId,session.university,i+1,r.elapsedMs,fmt(r.elapsedMs)])])}
 let fbReady=null;
-async function connectFirebase(){if(fbReady)return fbReady;fbReady=(async()=>{if(firebaseConfig.apiKey==='REPLACE_ME')throw Error('firebase-config.js の設定が未完了です');const app=initializeApp(firebaseConfig);db=getFirestore(app);auth=getAuth(app);await signInAnonymously(auth);return db})();try{return await fbReady}catch(e){fbReady=null;throw e}}
+async function connectFirebase(){
+  if(fbReady)return fbReady;
+  fbReady=(async()=>{
+    if(firebaseConfig.apiKey==='REPLACE_ME')throw Error('firebase-config.js の設定が未完了です');
+    if(!navigator.onLine)throw Error('オフラインのためFirebaseに接続できません');
+    const [appSdk,authSdk,firestoreSdk]=await Promise.all([
+      import('https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js'),
+      import('https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js')
+    ]);
+    ({initializeApp}=appSdk);
+    ({getAuth,signInAnonymously}=authSdk);
+    ({getFirestore,doc,collection,onSnapshot,serverTimestamp,runTransaction}=firestoreSdk);
+    const app=initializeApp(firebaseConfig);
+    db=getFirestore(app);
+    auth=getAuth(app);
+    await signInAnonymously(auth);
+    return db;
+  })();
+  try{return await fbReady}catch(e){fbReady=null;throw e}
+}
 async function send(){if(session.records.length!==10)return alert('10人分揃っていません');if(!navigator.onLine)return alert('現在オフラインです。電波の良い場所で再試行してください。');const button=$('sendBtn');button.disabled=true;$('sendStatus').textContent='送信中…';try{await connectFirebase();const revision=session.revision;const payload={raceId:session.raceId,university:session.university,measurementId:session.measurementId,deviceId:session.deviceId,referenceUniversity:session.referenceUniversity,runners:session.records.map((r,i)=>({order:i+1,elapsedMs:r.elapsedMs})),revision,updatedAt:serverTimestamp()};const ref=doc(db,'offlineRaces',session.raceId,'submissions',session.university);await runTransaction(db,async tx=>{const old=await tx.get(ref);if(old.exists()){const prev=old.data();if(prev.measurementId!==session.measurementId)throw Error('この大学には別端末からの送信が登録済みです。誤上書きを防止しました。本部に確認してください。');if(prev.revision>revision)throw Error('サーバー側に新しい修正版があります。')}tx.set(ref,payload)});session.sentRevision=revision;await persist();$('sendStatus').textContent='Firebaseへの送信が完了しました。';render()}catch(e){$('sendStatus').textContent='送信失敗：'+e.message;render()}}
 function correctionKey(r,u){return `correction:${r}:${u}`}
 function getCorrection(r,u){return Number(localStorage.getItem(correctionKey(r,u))||0)}
